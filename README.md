@@ -1,58 +1,266 @@
-# mini-LIMS
+# Mini-LIMS
 
-Um pequeno **Laboratory Information Management System** construído em camadas para aprender
-Bash, Linux, SQL/SQLite, APIs, testes e arquitetura. Não é pronto para produção (veja "Limitações").
+A terminal-first **Laboratory Information Management System (LIMS)** built with Bash, SQLite and Python.
 
+The project models a simplified laboratory workflow from sample registration through testing, result validation, review and approval, with business rules enforced at the database level.
+
+## Overview
+
+This project was built as a practical exploration of how real-world **business processes and requirements can be translated into software workflows, data structures, validation rules and operational controls**.
+
+Rather than implementing a simple CRUD application, the system focuses on workflow integrity, traceability, validation, auditability and Linux-based operations.
+
+### Core workflow
+
+```text
+Client
+  ↓
+Sample
+  ↓
+Test Request
+  ↓
+Result
+  ↓
+Review
+  ↓
+Approval
 ```
-Linux → Bash CLI → camada de dados → SQLite (schema + triggers) → regras → validação
-      → auditoria → API REST → automação (cron) → testes
+
+Sample lifecycle:
+
+```text
+RECEIVED
+   ↓
+REGISTERED
+   ↓
+IN_TESTING
+   ↓
+COMPLETED
+   ↓
+REVIEWED
+   ↓
+APPROVED
 ```
 
-## Requisitos
-Linux, **Bash ≥ 4.4**, **sqlite3 ≥ 3.33**, **Python ≥ 3.8** (só para a API e seus testes; sem pacotes extras),
-coreutils (`sha256sum`, `stat`, `flock`). Debian/Ubuntu: `sudo apt install sqlite3 python3 git`.
+## Key Features
 
-## Instalação (2 minutos)
-```bash
-cd mini-lims
-bin/lab system init --seed        # cria data/, logs/, backups/, aplica migrations, carrega dados demo
-ln -s "$PWD/bin/lab" ~/.local/bin/lab   # opcional: usar só "lab" (garanta ~/.local/bin no PATH)
-lab system health
-tests/run.sh                      # roda toda a suíte
-scripts/demo.sh                   # passeio narrado em banco descartável
-```
+### Laboratory Workflow
 
-## Primeiros passos
+* Client management
+* Sample registration
+* Test requests
+* Result entry and updates
+* Sample status management
+* Result flags: `NORMAL`, `LOW`, `HIGH`, `INVALID`
+* Review and approval workflow
+* Post-approval data locking
+* Business-rule enforcement
+
+### Data Integrity & Validation
+
+* SQLite relational database
+* Database-level constraints and triggers
+* Validation of laboratory results
+* Protection against invalid workflow transitions
+* Protection against direct database writes bypassing business rules
+* Transactional operations
+
+### Audit Trail
+
+Every relevant business change is recorded with:
+
+* User
+* Action
+* Timestamp
+* Entity
+* Before value
+* After value
+
+The audit trail is designed to provide traceability across the laboratory workflow.
+
+### CLI
+
+The system is operated primarily through a Bash command-line interface.
+
+Examples:
+
 ```bash
 lab client list
-lab sample create --client ACME --type WATER --collected 2026-09-25 --description "Torneira"
-lab sample register SAM-0001
-lab request create SAM-0001 PH
+
+lab sample create \
+  --client ACME \
+  --type WATER \
+  --collected 2026-09-29
+
+lab test request SAM-0001 PH
+
 lab result add SAM-0001 PH 7.42
+
 lab sample status SAM-0001
-lab audit show SAM-0001
+
+lab audit SAM-0001
 ```
-Ajuda: `lab --help`. Usuários demo: `admin`, `analyst1`, `reviewer1` (troque com `LAB_USER=reviewer1 lab ...`).
-Saída JSON: `lab --json sample list`. API: `python3 src/api/server.py` (docs/API.md).
 
-## Estrutura
-| Pasta | Papel |
-|---|---|
-| `bin/lab` | Despachante da CLI |
-| `src/lib/` | Bibliotecas Bash: erros/validação, config, acesso ao SQLite, auditoria, permissões |
-| `src/cmd/` | Um arquivo por recurso (`sample.sh`, `result.sh`, ...) |
-| `src/api/server.py` | API REST (stdlib); chama a CLI, não duplica regras |
-| `migrations/` | Schema versionado; **regras de negócio como triggers** |
-| `database/seed.sql` | Dados demo |
-| `scripts/` | cron, demo |
-| `tests/` | Suítes Bash + `test_api.py` |
-| `docs/` | Documentação |
-| `data/ logs/ backups/` | Estado em runtime (ignorado pelo Git) |
+## REST API
 
-## Git
-`.gitignore` exclui banco, logs e backups. Convenção: um commit por marco (`feat:`, `test:`, `docs:`).
+A lightweight REST API is implemented in Python using the standard library.
 
-## Limitações conhecidas
-Sem senhas (identidade via `LAB_USER`/`X-Lab-User`); CSV simples sem campos entre aspas; uma
-consulta sqlite por chamada (lento com milhares de linhas); API sem TLS e um processo por requisição;
-mudar a especificação de um teste não recalcula flags antigos. Veja docs/ARCHITECTURE.md.
+The API reuses the CLI/business workflow instead of maintaining a separate implementation of the same rules.
+
+This provides a simple example of exposing an existing business application through an HTTP interface while keeping behavior consistent between interfaces.
+
+## Linux & Operations
+
+The project also includes operational tooling for a Linux environment:
+
+* Database initialization
+* Health checks
+* Online database backup
+* Backup checksum verification
+* Safe restore procedures
+* Log management
+* Scheduled operations with `cron`
+* `flock`-based execution protection
+* Restricted file permissions
+* Shell-based automation
+
+## Testing
+
+The project includes automated validation across multiple layers.
+
+Current test suite:
+
+| Test area      |  Checks |
+| -------------- | ------: |
+| CLI validation |      25 |
+| Business rules |      61 |
+| CSV import     |      22 |
+| Operations     |      22 |
+| REST API       |       6 |
+| **Total**      | **135** |
+
+The test suite includes both positive and negative scenarios, including attempts to bypass business rules through direct database operations.
+
+Run the complete suite with:
+
+```bash
+tests/run.sh
+```
+
+## Architecture
+
+```text
+                ┌─────────────┐
+                │  Bash CLI   │
+                └──────┬──────┘
+                       │
+                       ▼
+                ┌─────────────┐
+                │   Business  │
+                │    Rules    │
+                └──────┬──────┘
+                       │
+              ┌────────┴────────┐
+              ▼                 ▼
+        ┌───────────┐     ┌───────────┐
+        │  SQLite   │     │ Audit Log │
+        └───────────┘     └───────────┘
+              ▲
+              │
+        ┌─────┴─────┐
+        │ REST API  │
+        │  Python   │
+        └───────────┘
+```
+
+The database is not treated simply as passive storage: important integrity rules are enforced at the database level to reduce the risk of inconsistent state.
+
+## Technology Stack
+
+**Languages & Runtime**
+
+* Bash 4.4+
+* Python 3
+* SQL / SQLite
+
+**Operating Environment**
+
+* Linux
+* Bash CLI
+* cron
+* standard Unix utilities
+
+**Application Concepts**
+
+* REST API
+* Relational database design
+* Business rules
+* Workflow management
+* Data validation
+* Audit logging
+* Role-based operations
+* Automated testing
+* Backup and restore
+* Security controls
+
+## What This Project Demonstrates
+
+### Business & Functional
+
+* Translating business processes into software workflows
+* Modeling entities and relationships
+* Defining business rules and state transitions
+* Designing validation requirements
+* Implementing traceability and approval workflows
+
+### Technical
+
+* Bash scripting
+* Linux command-line operations
+* SQL and relational database design
+* SQLite triggers and constraints
+* Python REST API development
+* CLI application design
+* Data import and automation
+
+### Quality & Reliability
+
+* Automated testing
+* Negative testing
+* Database integrity testing
+* Workflow validation
+* Auditability
+* Operational safeguards
+
+### Implementation Perspective
+
+The project intentionally sits at the intersection of **business systems and software implementation**.
+
+The goal was not only to make the application work, but to model how requirements, workflows, validation rules, user roles and operational processes become an actual working system.
+
+## Project Structure
+
+```text
+mini-lims/
+├── bin/
+├── config/
+├── data/
+├── database/
+├── docs/
+├── migrations/
+├── scripts/
+├── src/
+└── tests/
+```
+
+See the `docs/` directory for architecture, database design, workflow, API, operations and testing documentation.
+
+## Disclaimer
+
+This is an educational and portfolio project inspired by real-world laboratory information management workflows.
+
+It is **not intended for production laboratory use** and does not implement the security, regulatory validation, authentication, infrastructure and operational controls required for a production LIMS.
+
+## Author
+
+Built as a hands-on project combining **Business Systems, Enterprise Software Implementation, Linux, Bash, databases and software engineering practices**.
